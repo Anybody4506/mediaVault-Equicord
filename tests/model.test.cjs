@@ -182,4 +182,25 @@ assert.equal(model.originalFileUrl("https://media.discordapp.net/external/abc/ht
     assert.equal(moved.items.find(item => item.url === view[0].url).categoryId, "g", "a GIF not yet synced can still be filed");
 }
 
+// Saved files must never get an extension Windows would run, whatever the link or the name says.
+assert.equal(model.fileNameFor("cat", "https://evil.example/cat.scr", "image/png"), "cat.png", "unknown link extension replaced by the content type's");
+assert.equal(model.fileNameFor("cat.hta", "https://evil.example/cat", "image/png"), "cat.hta.png", "dangerous name extension neutralised");
+assert.equal(model.fileNameFor("virus.exe", "https://evil.example/x", "image/x-icon"), "virus.exe.bin", "no media extension known: .bin added");
+assert.equal(model.fileNameFor("virus.exe.", "https://evil.example/x"), "virus.exe.bin", "trailing dot cannot hide the extension");
+assert.equal(model.fileNameFor("cat\u202Egnp.exe", "https://evil.example/x"), "cat_gnp.exe.bin", "bidi override removed");
+assert.equal(model.fileNameFor("clip", "https://evil.example/x"), "clip", "a name without extension is kept");
+assert.equal(model.withMediaExtension("photo.jpeg"), "photo.jpeg", "media extension kept");
+assert.equal(model.withMediaExtension(model.withMediaExtension("virus.exe")), "virus.exe.bin", ".bin added only once");
+
+// Imported libraries keep web links only.
+const imported = model.readImportedLibrary({ items: [
+    { url: "file:///C:/Windows/System32/calc.exe", name: "bad", kind: "image" },
+    { url: "javascript:alert(1)", name: "bad", kind: "image" },
+    { url: "https://cdn.example/ok.png", name: "ok", kind: "image", previewUrl: "file:///x.png", messageUrl: "javascript:alert(1)", sourceUrl: "https://example.com/" }
+], categories: [] });
+assert.equal(imported.items.length, 1, "non-web links dropped");
+assert.equal(imported.items[0].previewUrl, undefined, "non-web preview dropped");
+assert.equal(imported.items[0].messageUrl, undefined, "non-web message link dropped");
+assert.equal(imported.items[0].sourceUrl, "https://example.com/", "web source link kept");
+
 console.log("model tests passed");

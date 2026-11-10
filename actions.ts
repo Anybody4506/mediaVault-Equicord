@@ -175,6 +175,7 @@ export async function downloadMedia(item: Pick<SavedMedia, "url" | "previewUrl" 
         const blob = await response.blob();
         saveBlob(blob, fileNameFor(item.name, source, blob.type));
     } catch (error) {
+        if (!/^https?:\/\//i.test(url)) return;
         console.warn("[MediaVault] Direct download failed, opening the link.", error);
         window.open(url, "_blank", "noopener,noreferrer");
     }

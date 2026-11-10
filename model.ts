@@ -118,6 +118,11 @@ function validColor(value: unknown): value is string {
     return typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
 }
 
+/** Only web links are kept: an imported file must not bring file:, javascript: or other schemes into the library. */
+function webUrl(value: unknown): string | undefined {
+    return typeof value === "string" && /^https?:\/\//i.test(value) ? value : undefined;
+}
+
 export function readLibrary(value: unknown): LibraryData {
     if (value === undefined || value === null) return { items: [], categories: [] };
     if (typeof value !== "object") throw new Error("The MediaVault favorites could not be read. The data was not overwritten.");
@@ -143,7 +148,7 @@ export function readLibrary(value: unknown): LibraryData {
             kind,
             color: validColor(category.color) ? category.color : undefined,
             parentId: typeof category.parentId === "string" ? category.parentId : null,
-            thumbnail: typeof category.thumbnail === "string" && /^https?:\/\//i.test(category.thumbnail) ? category.thumbnail : undefined
+            thumbnail: webUrl(category.thumbnail)
         });
     }
 
@@ -174,9 +179,11 @@ export function readLibrary(value: unknown): LibraryData {
             || !validKind(item.kind)
             || (item.categoryId !== null && item.categoryId !== undefined && typeof item.categoryId !== "string"))
             throw new Error("A saved MediaVault media is invalid. The data was not overwritten.");
+        // A media whose link is not a web link is dropped rather than failing the whole library.
+        if (!webUrl(item.url)) continue;
         items.push({
             url: item.url,
-            previewUrl: typeof item.previewUrl === "string" ? item.previewUrl : undefined,
+            previewUrl: webUrl(item.previewUrl),
             name: item.name,
             kind: item.kind,
             width: typeof item.width === "number" ? item.width : undefined,
@@ -184,8 +191,8 @@ export function readLibrary(value: unknown): LibraryData {
             categoryId: typeof item.categoryId === "string" && categoryIds.has(item.categoryId) ? item.categoryId : null,
             savedAt: typeof item.savedAt === "number" ? item.savedAt : 0,
             nativeFavorite: typeof item.nativeFavorite === "boolean" ? item.nativeFavorite : undefined,
-            messageUrl: typeof item.messageUrl === "string" ? item.messageUrl : undefined,
-            sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl : undefined
+            messageUrl: webUrl(item.messageUrl),
+            sourceUrl: webUrl(item.sourceUrl)
         });
     }
     return { items, categories };
@@ -635,12 +642,27 @@ export function sameFormat(mime: string | undefined, sourceUrl: string): boolean
     return !wanted || !actual || wanted === actual;
 }
 
+/** Extensions a saved file may end with: media formats only, never one Windows would run (exe, scr, hta, lnk...). */
+export const MEDIA_EXTENSIONS = new Set([...Object.values(MIME_EXTENSIONS), "jpeg", "heic", "heif", "m4v", "avi", "mpeg", "mpg", "oga"]);
+
+// Path separators, characters Windows refuses, control characters and the bidi marks that can disguise an extension (U+202E).
+export const UNSAFE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001f\u007f‎‏‪-‮⁦-⁩]/g;
+
+/** Makes sure a file name ends with a media extension: "clip.exe" becomes "clip.exe.bin", "clip" stays "clip". */
+export function withMediaExtension(fileName: string): string {
+    // Windows drops trailing dots and spaces, so "clip.exe." would be saved as "clip.exe".
+    const trimmed = fileName.replace(/[.\s]+$/, "") || "media";
+    const ext = /\.([^.]+)$/.exec(trimmed)?.[1].toLowerCase();
+    return !ext || ext === "bin" || MEDIA_EXTENSIONS.has(ext) ? trimmed : `${trimmed}.bin`;
+}
+
 /** File name with the real extension, taken from the original link first, then from the content type. */
 export function fileNameFor(name: string, sourceUrl: string, mime?: string): string {
-    const safe = name.replace(/[\\/:*?"<>|]/g, "_").trim() || "media";
-    const ext = extensionOfUrl(sourceUrl) ?? extensionOfMime(mime);
-    if (!ext) return safe;
-    return safe.toLowerCase().endsWith(`.${ext}`) || (ext === "jpg" && /\.jpe?g$/i.test(safe)) ? safe : `${safe}.${ext}`;
+    const safe = name.replace(UNSAFE_NAME_CHARACTERS, "_").trim() || "media";
+    const fromUrl = extensionOfUrl(sourceUrl);
+    const ext = fromUrl && MEDIA_EXTENSIONS.has(fromUrl) ? fromUrl : extensionOfMime(mime);
+    if (!ext) return withMediaExtension(safe);
+    return withMediaExtension(safe.toLowerCase().endsWith(`.${ext}`) || (ext === "jpg" && /\.jpe?g$/i.test(safe)) ? safe : `${safe}.${ext}`);
 }
 
 /** The original file behind a Discord attachment link: no resizing or format conversion by the media proxy. */
